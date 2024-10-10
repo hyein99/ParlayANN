@@ -38,6 +38,9 @@
 #include "parlay/random.h"
 #include "../utils/beamSearch.h"
 
+// #include <sys/resource.h>
+// #include <iostream>
+
 
 template<typename PointRange, typename indexType>
 struct knn_index {
@@ -143,7 +146,14 @@ struct knn_index {
 
   void set_start(){start_point = 0;}
 
-  void build_index(GraphI &G, PR &Points, stats<indexType> &BuildStats, bool sort_neighbors = true){
+  // // 메모리 사용량을 출력하는 함수
+  // long get_memory_usage() {
+  //     struct rusage usage;
+  //     getrusage(RUSAGE_SELF, &usage);
+  //     return usage.ru_maxrss;  // 현재 메모리 사용량 (KB)
+  // }
+
+  void build_index(GraphI &G, PR &Points, stats<indexType> &BuildStats, bool sort_neighbors = true, bool distance = false) {
     std::cout << "Building graph..." << std::endl;
     set_start();
     parlay::sequence<indexType> inserts = parlay::tabulate(Points.size(), [&] (size_t i){
@@ -184,6 +194,9 @@ struct knn_index {
                     GraphI &G, PR &Points, stats<indexType> &BuildStats, double alpha,
                     bool random_order = false, double base = 2,
                     double max_fraction = .02, bool print=true) {
+    // // initial memory usage
+    // long max_memory_usage = get_memory_usage();
+
     for(int p : inserts){
       if(p < 0 || p > (int) G.size()){
         std::cout << "ERROR: invalid point "
@@ -233,6 +246,8 @@ struct knn_index {
         count = m;
       }
       
+      // std::cout << "Batch insert: " << floor << " to " << ceiling << "(" << ceiling-floor << ")" << std::endl;
+
       parlay::sequence<parlay::sequence<indexType>> new_out_(ceiling-floor);
       // search for each node starting from the start_point, then call
       // robustPrune with the visited list as its candidate set
@@ -264,11 +279,30 @@ struct knn_index {
                                       return std::pair(ngh, index);});}));
       auto grouped_by = parlay::group_by_key(parlay::delayed::to_sequence(flattened));
 
+      // std::cout << "new_out_" << std::endl;
+      // for (size_t i = 0; i < new_out_.size(); i++) {
+      //   std::cout << shuffled_inserts[floor + i] << ") ";
+      //   for (size_t j = 0; j < new_out_[i].size(); j++) {
+      //     std::cout << new_out_[i][j] << " ";
+      //   }
+      //   std::cout << std::endl;
+      // }
+
+      // std::cout << "grouped_by" << std::endl;
+      // for (size_t i = 0; i < grouped_by.size(); i++) {
+      //   std::cout << grouped_by[i].first << ") ";
+      //   for (size_t j = 0; j < grouped_by[i].second.size(); j++) {
+      //     std::cout << grouped_by[i].second[j] << " ";
+      //   }
+      //   std::cout << std::endl;
+      // }
+
       parlay::parallel_for(floor, ceiling, [&](size_t i) {
          G[shuffled_inserts[i]].update_neighbors(new_out_[i-floor]);
       });
 
       t_bidirect.stop();
+      
       t_prune.start();
       // finally, add the bidirectional edges; if they do not make
       // the vertex exceed the degree bound, just add them to out_nbhs;
@@ -295,7 +329,17 @@ struct knn_index {
         }
       }
       inc += 1;
+
+    //   // current memory usage
+    //   long current_memory_usage = get_memory_usage();
+    //   if (current_memory_usage > max_memory_usage) {
+    //       max_memory_usage = current_memory_usage;
+    //   }
     }
+
+    // // 최종적으로 기록된 최대 메모리 사용량 출력
+    // std::cout << "Max memory usage during batch insert: " << max_memory_usage << " KB" << std::endl;
+    
     t_beam.total();
     t_bidirect.total();
     t_prune.total();
