@@ -177,18 +177,18 @@ struct Graph{
       size_t g_floor = index;
       size_t g_ceiling = g_floor + BLOCK_SIZE <= n ? g_floor + BLOCK_SIZE : n;
       size_t total_size_to_read = offsets[g_ceiling] - offsets[g_floor];
-      indexType* edges_start = new indexType[total_size_to_read];
-      reader.read((char*) (edges_start), sizeof(indexType) * total_size_to_read);
-      indexType* edges_end = edges_start + total_size_to_read;
-      parlay::slice<indexType*, indexType*> edges =
-        parlay::make_slice(edges_start, edges_end);
-      indexType* gr = graph.get();
-      parlay::parallel_for(g_floor, g_ceiling, [&] (size_t i){
-        gr[i * (maxDeg + 1)] = degrees[i];
-        for(size_t j = 0; j < degrees[i]; j++){
-          gr[i * (maxDeg + 1) + 1 + j] = edges[offsets[i] - total_size_read + j];
-        }
-      });
+        indexType* edges_start = new indexType[total_size_to_read];
+        reader.read((char*) (edges_start), sizeof(indexType) * total_size_to_read);
+        indexType* edges_end = edges_start + total_size_to_read;
+        parlay::slice<indexType*, indexType*> edges =
+          parlay::make_slice(edges_start, edges_end);
+        indexType* gr = graph.get();
+        parlay::parallel_for(g_floor, g_ceiling, [&] (size_t i){
+          gr[i * (maxDeg + 1)] = degrees[i];
+          for(size_t j = 0; j < degrees[i]; j++){
+            gr[i * (maxDeg + 1) + 1 + j] = edges[offsets[i] - total_size_read + j];
+          }
+        });
       total_size_read += total_size_to_read;
       index = g_ceiling;
       delete[] edges_start;

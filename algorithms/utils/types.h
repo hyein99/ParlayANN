@@ -151,6 +151,7 @@ struct BuildParams{
   double alpha; //vamana and pyNNDescent
   int num_passes; //vamana
   int single_batch; //vamana
+  bool disk; //vamana
 
   long num_clusters; // HCNNG and pyNNDescent
   long cluster_size; //HCNNG and pyNNDescent
@@ -170,9 +171,9 @@ struct BuildParams{
 
   BuildParams(long R, long L, double a, int num_passes, long nc, long cs, long mst, double de,
               bool verbose = false, bool quantize = false, double radius = 0.0, double radius_2 = 0.0,
-              bool self = false, bool range = false, int single_batch = 0)
+              bool self = false, bool range = false, int single_batch = 0, bool disk = false)
     : R(R), L(L), alpha(a), num_passes(num_passes), num_clusters(nc), cluster_size(cs), MST_deg(mst), delta(de),
-      verbose(verbose), quantize(quantize), radius(radius), radius_2(radius_2), self(self), range(range), single_batch(single_batch) {
+      verbose(verbose), quantize(quantize), radius(radius), radius_2(radius_2), self(self), range(range), single_batch(single_batch), disk(disk) {
     if(R != 0 && L != 0 && alpha != 0){alg_type = m_l>0? "HNSW": "Vamana";}
     else if(num_clusters != 0 && cluster_size != 0 && MST_deg != 0){alg_type = "HCNNG";}
     else if(R != 0 && alpha != 0 && num_clusters != 0 && cluster_size != 0 && delta != 0){alg_type = "pyNNDescent";}

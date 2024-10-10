@@ -22,6 +22,7 @@ cc_test(
         "//algorithms/utils:types",
         "//algorithms/utils:mmap",
         "//algorithms/utils:graph",
+        "//algorithms/utils:graph_disk",
         "//algorithms/utils:beamSearch",
         "//algorithms/utils:stats",
         "//algorithms/bench:parse_command_line",
