@@ -21,6 +21,7 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <iostream>
+#include <fstream>
 #include <algorithm>
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
@@ -31,6 +32,7 @@
 #include "../utils/point_range.h"
 #include "../utils/mips_point.h"
 #include "../utils/graph.h"
+#include "../utils/graph_disk.h"
 
 
 
@@ -52,6 +54,29 @@ using uint = unsigned int;
 
 template<typename Point, typename PointRange, typename indexType>
 void timeNeighbors(Graph<indexType> &G,
+		   PointRange &Query_Points, long k,
+		   BuildParams &BP, char* outFile,
+		   groundTruth<indexType> GT, char* res_file, bool graph_built, PointRange &Points)
+{
+
+
+    time_loop(1, 0,
+      [&] () {},
+      [&] () {
+        ANN<Point, PointRange, indexType>(G, k, BP, Query_Points, GT, res_file, graph_built, Points);
+      },
+      [&] () {});
+
+    if(outFile != NULL) {
+      G.save(outFile);
+    }
+
+
+}
+
+
+template<typename Point, typename PointRange, typename indexType>
+void timeNeighbors_disk(Graph_disk<indexType> &G,
 		   PointRange &Query_Points, long k,
 		   BuildParams &BP, char* outFile,
 		   groundTruth<indexType> GT, char* res_file, bool graph_built, PointRange &Points)
@@ -116,11 +141,12 @@ int main(int argc, char* argv[]) {
   bool self = P.getOption("-self");
   bool range = P.getOption("-range");
   int single_batch = P.getOptionIntValue("-single_batch", 0);
+  bool disk = P.getOption("-disk");
     
   std::string df = std::string(dfc);
   std::string tp = std::string(vectype);
 
-  BuildParams BP = BuildParams(R, L, alpha, num_passes, num_clusters, cluster_size, MST_deg, delta, verbose, quantize_build, radius, radius_2, self, range, single_batch);
+  BuildParams BP = BuildParams(R, L, alpha, num_passes, num_clusters, cluster_size, MST_deg, delta, verbose, quantize_build, radius, radius_2, self, range, single_batch, disk);
   long maxDeg = BP.max_degree();
 
   if((tp != "uint8") && (tp != "int8") && (tp != "float")){
@@ -136,111 +162,123 @@ int main(int argc, char* argv[]) {
   bool graph_built = (gFile != NULL);
 
   groundTruth<uint> GT = groundTruth<uint>(cFile);
-  
-  if(tp == "float"){
-    if(df == "Euclidian"){
-      PointRange<float, Euclidian_Point<float>> Points = PointRange<float, Euclidian_Point<float>>(iFile);
-      PointRange<float, Euclidian_Point<float>> Query_Points = PointRange<float, Euclidian_Point<float>>(qFile);
-      if (normalize) {
-        std::cout << "normalizing data" << std::endl;
-        for (int i=0; i < Points.size(); i++) 
-          Points[i].normalize();
-        for (int i=0; i < Query_Points.size(); i++) 
-          Query_Points[i].normalize();
-      }
-      Graph<unsigned int> G; 
-      if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
-      else G = Graph<unsigned int>(gFile);
-      if (quantize == 8) {
-        std::cout << "quantizing data to 1 byte" << std::endl;
-        using QT = uint8_t;
-        using QPoint = Euclidian_Point<QT>;
-        using PR = PointRange<QT, QPoint>;
-        PR Points_(Points);
-        PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<QPoint, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
-      } else if (quantize == 16) {
-        std::cout << "quantizing data to 2 bytes" << std::endl;
-        using Point = Euclidian_Point<uint16_t>;
-        using PR = PointRange<uint16_t, Point>;
-        PR Points_(Points);
-        PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
-      } else {
-        using Point = Euclidian_Point<float>;
-        using PR = PointRange<float, Point>;
-        timeNeighbors<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
-      }
-    } else if(df == "mips"){
-      PointRange<float, Mips_Point<float>> Points = PointRange<float, Mips_Point<float>>(iFile);
-      PointRange<float, Mips_Point<float>> Query_Points = PointRange<float, Mips_Point<float>>(qFile);
-      if (normalize) {
-        std::cout << "normalizing data" << std::endl;
-        for (int i=0; i < Points.size(); i++) 
-          Points[i].normalize();
-        for (int i=0; i < Query_Points.size(); i++) 
-          Query_Points[i].normalize();
-      }
-      Graph<unsigned int> G; 
-      if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
-      else G = Graph<unsigned int>(gFile);
-      if (quantize == 8) {
-        std::cout << "quantizing data to 1 byte" << std::endl;
-        using QT = int8_t;
-        using Point = Quantized_Mips_Point<QT>;
-        using PR = PointRange<QT, Point>;
-        PR Points_(Points);
-        PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
-      } else if (quantize == 16) {
-        std::cout << "quantizing data to 2 bytes" << std::endl;
-        using QT = int16_t;
-        using Point = Quantized_Mips_Point<QT>;
-        using PR = PointRange<QT, Point>;
-        PR Points_(Points);
-        PR Query_Points_(Query_Points, Points_.params);
-        timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
-      } else {
-        using Point = Mips_Point<float>;
-        using PR = PointRange<float, Point>;
-        timeNeighbors<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
-      }
+  if(disk) {
+    PointRange<float, Euclidian_Point<float>> Points = PointRange<float, Euclidian_Point<float>>(iFile);
+    PointRange<float, Euclidian_Point<float>> Query_Points = PointRange<float, Euclidian_Point<float>>(qFile);
+
+    Graph_disk<unsigned int> G; 
+    if(gFile == NULL) G = Graph_disk<unsigned int>(maxDeg, Points.size());
+    else G = Graph_disk<unsigned int>(gFile);
+
+    using Point = Euclidian_Point<float>;
+    using PR = PointRange<float, Point>;
+    timeNeighbors_disk<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
+  } else {
+    if(tp == "float"){
+      if(df == "Euclidian"){
+        PointRange<float, Euclidian_Point<float>> Points = PointRange<float, Euclidian_Point<float>>(iFile);
+        PointRange<float, Euclidian_Point<float>> Query_Points = PointRange<float, Euclidian_Point<float>>(qFile);
+        if (normalize) {
+          std::cout << "normalizing data" << std::endl;
+          for (int i=0; i < Points.size(); i++) 
+            Points[i].normalize();
+          for (int i=0; i < Query_Points.size(); i++) 
+            Query_Points[i].normalize();
+        }
+        Graph<unsigned int> G; 
+        if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
+        else G = Graph<unsigned int>(gFile);
+        if (quantize == 8) {
+          std::cout << "quantizing data to 1 byte" << std::endl;
+          using QT = uint8_t;
+          using QPoint = Euclidian_Point<QT>;
+          using PR = PointRange<QT, QPoint>;
+          PR Points_(Points);
+          PR Query_Points_(Query_Points, Points_.params);
+          timeNeighbors<QPoint, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
+        } else if (quantize == 16) {
+          std::cout << "quantizing data to 2 bytes" << std::endl;
+          using Point = Euclidian_Point<uint16_t>;
+          using PR = PointRange<uint16_t, Point>;
+          PR Points_(Points);
+          PR Query_Points_(Query_Points, Points_.params);
+          timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
+        } else {
+          using Point = Euclidian_Point<float>;
+          using PR = PointRange<float, Point>;
+          timeNeighbors<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
+        }
+      } else if(df == "mips"){
+        PointRange<float, Mips_Point<float>> Points = PointRange<float, Mips_Point<float>>(iFile);
+        PointRange<float, Mips_Point<float>> Query_Points = PointRange<float, Mips_Point<float>>(qFile);
+        if (normalize) {
+          std::cout << "normalizing data" << std::endl;
+          for (int i=0; i < Points.size(); i++) 
+            Points[i].normalize();
+          for (int i=0; i < Query_Points.size(); i++) 
+            Query_Points[i].normalize();
+        }
+        Graph<unsigned int> G; 
+        if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
+        else G = Graph<unsigned int>(gFile);
+        if (quantize == 8) {
+          std::cout << "quantizing data to 1 byte" << std::endl;
+          using QT = int8_t;
+          using Point = Quantized_Mips_Point<QT>;
+          using PR = PointRange<QT, Point>;
+          PR Points_(Points);
+          PR Query_Points_(Query_Points, Points_.params);
+          timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
+        } else if (quantize == 16) {
+          std::cout << "quantizing data to 2 bytes" << std::endl;
+          using QT = int16_t;
+          using Point = Quantized_Mips_Point<QT>;
+          using PR = PointRange<QT, Point>;
+          PR Points_(Points);
+          PR Query_Points_(Query_Points, Points_.params);
+          timeNeighbors<Point, PR, uint>(G, Query_Points_, k, BP, oFile, GT, rFile, graph_built, Points_);
+        } else {
+          using Point = Mips_Point<float>;
+          using PR = PointRange<float, Point>;
+          timeNeighbors<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
+        }
     }
-  } else if(tp == "uint8"){
-    if(df == "Euclidian"){
-      PointRange<uint8_t, Euclidian_Point<uint8_t>> Points = PointRange<uint8_t, Euclidian_Point<uint8_t>>(iFile);
-      PointRange<uint8_t, Euclidian_Point<uint8_t>> Query_Points = PointRange<uint8_t, Euclidian_Point<uint8_t>>(qFile);
-      Graph<unsigned int> G; 
-      if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
-      else G = Graph<unsigned int>(gFile);
-      timeNeighbors<Euclidian_Point<uint8_t>, PointRange<uint8_t, Euclidian_Point<uint8_t>>, uint>(G, Query_Points, k, BP, 
-        oFile, GT, rFile, graph_built, Points);
-    } else if(df == "mips"){
-      PointRange<uint8_t, Mips_Point<uint8_t>> Points = PointRange<uint8_t, Mips_Point<uint8_t>>(iFile);
-      PointRange<uint8_t, Mips_Point<uint8_t>> Query_Points = PointRange<uint8_t, Mips_Point<uint8_t>>(qFile);
-      Graph<unsigned int> G; 
-      if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
-      else G = Graph<unsigned int>(gFile);
-      timeNeighbors<Mips_Point<uint8_t>, PointRange<uint8_t, Mips_Point<uint8_t>>, uint>(G, Query_Points, k, BP, 
-        oFile, GT, rFile, graph_built, Points);
-    }
-  } else if(tp == "int8"){
-    if(df == "Euclidian"){
-      PointRange<int8_t, Euclidian_Point<int8_t>> Points = PointRange<int8_t, Euclidian_Point<int8_t>>(iFile);
-      PointRange<int8_t, Euclidian_Point<int8_t>> Query_Points = PointRange<int8_t, Euclidian_Point<int8_t>>(qFile);
-      Graph<unsigned int> G; 
-      if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
-      else G = Graph<unsigned int>(gFile);
-      timeNeighbors<Euclidian_Point<int8_t>, PointRange<int8_t, Euclidian_Point<int8_t>>, uint>(G, Query_Points, k, BP,
-        oFile, GT, rFile, graph_built, Points);
-    } else if(df == "mips"){
-      PointRange<int8_t, Mips_Point<int8_t>> Points = PointRange<int8_t, Mips_Point<int8_t>>(iFile);
-      PointRange<int8_t, Mips_Point<int8_t>> Query_Points = PointRange<int8_t, Mips_Point<int8_t>>(qFile);
-      Graph<unsigned int> G; 
-      if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
-      else G = Graph<unsigned int>(gFile);
-      timeNeighbors<Mips_Point<int8_t>, PointRange<int8_t, Mips_Point<int8_t>>, uint>(G, Query_Points, k, BP,
-        oFile, GT, rFile, graph_built, Points);
+    } else if(tp == "uint8"){
+        if(df == "Euclidian"){
+          PointRange<uint8_t, Euclidian_Point<uint8_t>> Points = PointRange<uint8_t, Euclidian_Point<uint8_t>>(iFile);
+          PointRange<uint8_t, Euclidian_Point<uint8_t>> Query_Points = PointRange<uint8_t, Euclidian_Point<uint8_t>>(qFile);
+          Graph<unsigned int> G; 
+          if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
+          else G = Graph<unsigned int>(gFile);
+          timeNeighbors<Euclidian_Point<uint8_t>, PointRange<uint8_t, Euclidian_Point<uint8_t>>, uint>(G, Query_Points, k, BP, 
+            oFile, GT, rFile, graph_built, Points);
+        } else if(df == "mips"){
+          PointRange<uint8_t, Mips_Point<uint8_t>> Points = PointRange<uint8_t, Mips_Point<uint8_t>>(iFile);
+          PointRange<uint8_t, Mips_Point<uint8_t>> Query_Points = PointRange<uint8_t, Mips_Point<uint8_t>>(qFile);
+          Graph<unsigned int> G; 
+          if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
+          else G = Graph<unsigned int>(gFile);
+          timeNeighbors<Mips_Point<uint8_t>, PointRange<uint8_t, Mips_Point<uint8_t>>, uint>(G, Query_Points, k, BP, 
+            oFile, GT, rFile, graph_built, Points);
+        }
+    } else if(tp == "int8"){
+      if(df == "Euclidian"){
+        PointRange<int8_t, Euclidian_Point<int8_t>> Points = PointRange<int8_t, Euclidian_Point<int8_t>>(iFile);
+        PointRange<int8_t, Euclidian_Point<int8_t>> Query_Points = PointRange<int8_t, Euclidian_Point<int8_t>>(qFile);
+        Graph<unsigned int> G; 
+        if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
+        else G = Graph<unsigned int>(gFile);
+        timeNeighbors<Euclidian_Point<int8_t>, PointRange<int8_t, Euclidian_Point<int8_t>>, uint>(G, Query_Points, k, BP,
+          oFile, GT, rFile, graph_built, Points);
+      } else if(df == "mips"){
+        PointRange<int8_t, Mips_Point<int8_t>> Points = PointRange<int8_t, Mips_Point<int8_t>>(iFile);
+        PointRange<int8_t, Mips_Point<int8_t>> Query_Points = PointRange<int8_t, Mips_Point<int8_t>>(qFile);
+        Graph<unsigned int> G; 
+        if(gFile == NULL) G = Graph<unsigned int>(maxDeg, Points.size());
+        else G = Graph<unsigned int>(gFile);
+        timeNeighbors<Mips_Point<int8_t>, PointRange<int8_t, Mips_Point<int8_t>>, uint>(G, Query_Points, k, BP,
+          oFile, GT, rFile, graph_built, Points);
+      }
     }
   }
   

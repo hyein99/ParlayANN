@@ -31,6 +31,7 @@
 #include "../utils/stats.h"
 #include "../utils/types.h"
 #include "../utils/graph.h"
+#include "../utils/graph_disk.h"
 #include "index.h"
 #include "parlay/parallel.h"
 #include "parlay/primitives.h"
@@ -128,4 +129,13 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
   } else {
     ANN_<Point, PointRange_, PointRange_, indexType>(G, k, BP, Query_Points, Query_Points, GT, res_file, graph_built, Points, Points);
   }
+}
+
+
+template<typename Point, typename PointRange_, typename indexType>
+void ANN(Graph_disk<indexType> &G, long k, BuildParams &BP,
+         PointRange_ &Query_Points,
+         groundTruth<indexType> GT, char *res_file,
+         bool graph_built, PointRange_ &Points) {
+  return;
 }
