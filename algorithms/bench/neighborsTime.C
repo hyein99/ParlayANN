@@ -86,13 +86,13 @@ void timeNeighbors_disk(Graph_disk<indexType> &G,
     time_loop(1, 0,
       [&] () {},
       [&] () {
-        ANN<Point, PointRange, indexType>(G, k, BP, Query_Points, GT, res_file, graph_built, Points);
+        ANN<Point, PointRange, indexType>(G, k, BP, Query_Points, GT, res_file, graph_built, Points, outFile);
       },
       [&] () {});
 
-    if(outFile != NULL) {
-      G.save(outFile);
-    }
+    // if(outFile != NULL) {
+    //   G.save(outFile);
+    // }
 
 
 }
@@ -163,16 +163,47 @@ int main(int argc, char* argv[]) {
 
   groundTruth<uint> GT = groundTruth<uint>(cFile);
   if(disk) {
-    PointRange<float, Euclidian_Point<float>> Points = PointRange<float, Euclidian_Point<float>>(iFile);
-    PointRange<float, Euclidian_Point<float>> Query_Points = PointRange<float, Euclidian_Point<float>>(qFile);
+    if(tp == "float"){
+      if(df == "Euclidean"){
+        PointRange<float, Euclidian_Point<float>> Points = PointRange<float, Euclidian_Point<float>>(iFile);
+        PointRange<float, Euclidian_Point<float>> Query_Points = PointRange<float, Euclidian_Point<float>>(qFile);
 
-    Graph_disk<unsigned int> G; 
-    if(gFile == NULL) G = Graph_disk<unsigned int>(maxDeg, Points.size());
-    else G = Graph_disk<unsigned int>(gFile);
+        Graph_disk<unsigned int> G; 
+        if(gFile == NULL) G = Graph_disk<unsigned int>(maxDeg, Points.size());
+        else G = Graph_disk<unsigned int>(gFile);
 
-    using Point = Euclidian_Point<float>;
-    using PR = PointRange<float, Point>;
-    timeNeighbors_disk<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
+        using Point = Euclidian_Point<float>;
+        using PR = PointRange<float, Point>;
+        timeNeighbors_disk<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
+      }
+    } else if (tp == "uint8"){
+      if(df == "Euclidian"){
+        PointRange<uint8_t, Euclidian_Point<uint8_t>> Points = PointRange<uint8_t, Euclidian_Point<uint8_t>>(iFile);
+        PointRange<uint8_t, Euclidian_Point<uint8_t>> Query_Points = PointRange<uint8_t, Euclidian_Point<uint8_t>>(qFile);
+
+        Graph_disk<unsigned int> G; 
+        if(gFile == NULL) G = Graph_disk<unsigned int>(maxDeg, Points.size());
+        else G = Graph_disk<unsigned int>(gFile);
+
+        using Point = Euclidian_Point<uint8_t>;
+        using PR = PointRange<uint8_t, Point>;
+        timeNeighbors_disk<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
+      }
+    } else if (tp == "int8"){
+      if(df == "Euclidian"){
+        PointRange<int8_t, Euclidian_Point<int8_t>> Points = PointRange<int8_t, Euclidian_Point<int8_t>>(iFile);
+        PointRange<int8_t, Euclidian_Point<int8_t>> Query_Points = PointRange<int8_t, Euclidian_Point<int8_t>>(qFile);
+
+        Graph_disk<unsigned int> G; 
+        if(gFile == NULL) G = Graph_disk<unsigned int>(maxDeg, Points.size());
+        else G = Graph_disk<unsigned int>(gFile);
+
+        using Point = Euclidian_Point<int8_t>;
+        using PR = PointRange<int8_t, Point>;
+        timeNeighbors_disk<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
+      }
+    }
+
   } else {
     if(tp == "float"){
       if(df == "Euclidian"){

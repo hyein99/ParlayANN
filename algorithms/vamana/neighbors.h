@@ -136,6 +136,6 @@ template<typename Point, typename PointRange_, typename indexType>
 void ANN(Graph_disk<indexType> &G, long k, BuildParams &BP,
          PointRange_ &Query_Points,
          groundTruth<indexType> GT, char *res_file,
-         bool graph_built, PointRange_ &Points) {
+         bool graph_built, PointRange_ &Points, char* outFile) {
   return;
 }
