@@ -98,6 +98,19 @@ struct edgeRange_disk{
     }
   }
 
+  template<typename rangeType>
+  void update_neighbors_global(const rangeType& r, int offset){
+    if (r.size() > maxDeg) {
+      std::cout << "ERROR in update_neighbors: cannot exceed max degree "
+                << maxDeg << std::endl;
+      abort();
+    }
+    edges[0].first = r.size();
+    for (int i = 0; i < r.size(); i++) {
+      edges[i+1] = std::make_pair(r[i].first + offset, r[i].second);
+    }
+  }
+
   // template<typename rangeType>
   // void append_neighbors(const rangeType& r){
   //   if (r.size() + edges[0] > maxDeg) {
@@ -259,6 +272,40 @@ struct Graph_disk{
     }
     writer.close();
   }
+
+  void save_subgraph(char* oFile) {
+    std::cout << "Writing graph with " << n
+              << " points and max degree " << maxDeg
+              << std::endl;
+    parlay::sequence<indexType> preamble =
+      {static_cast<indexType>(n), static_cast<indexType>(maxDeg)};
+    parlay::sequence<indexType> sizes = parlay::tabulate(n, [&] (size_t i){
+      return static_cast<indexType>((*this)[i].size());});
+    std::ofstream writer;
+    writer.open(oFile, std::ios::binary | std::ios::out);
+    writer.write((char*) preamble.begin(), 2 * sizeof(indexType));
+    writer.write((char*) sizes.begin(), sizes.size() * sizeof(indexType));
+    size_t BLOCK_SIZE = 1000000;
+    size_t index = 0;
+    while (index < n) {
+        size_t floor = index;
+        size_t ceiling = index + BLOCK_SIZE <= n ? index + BLOCK_SIZE : n;
+        
+        // 이웃 노드 ID와 거리 정보를 저장할 구조 생성
+        auto edge_data = parlay::tabulate(ceiling - floor, [&] (size_t i){
+            return parlay::tabulate(sizes[i + floor], [&] (size_t j){
+                return std::make_pair((*this)[i + floor][j].first, (*this)[i + floor][j].second);
+                // return std::make_pair((*this)[i + floor][j+1].first, (*this)[i + floor][j+1].second);
+            });
+        });
+        parlay::sequence<std::pair<indexType, float>> data = parlay::flatten(edge_data);
+        writer.write((char*)data.begin(), data.size() * sizeof(std::pair<indexType, float>));
+        
+        index = ceiling;
+    }
+
+    writer.close();
+}
 
   edgeRange_disk<indexType> operator [] (indexType i) {
     if (i > n) {

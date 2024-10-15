@@ -65,7 +65,7 @@ struct knn_index {
   //of directly replacing the out_nbh of p
   std::pair<parlay::sequence<std::pair<indexType, distanceType>>, long>
   robustPrune(indexType p, parlay::sequence<pid>& cand,
-              GraphI &G, PR &Points, double alpha, bool add = true) {
+              GraphI &G, PR &Points, double alpha, int offset, bool add = true) {
     // add out neighbors of p to the candidate set.
     size_t out_size = G[p].size();
     std::vector<pid> candidates;
@@ -74,8 +74,8 @@ struct knn_index {
 
     if(add){
       for (size_t i=0; i<out_size; i++) {
-        distance_comps++;
-        candidates.push_back(std::make_pair(G[p][i].first, G[p][i].second));
+        // distance_comps++;
+        candidates.push_back(std::make_pair(G[p][i].first - offset, G[p][i].second));
       }
     }
 
@@ -139,12 +139,12 @@ struct knn_index {
 
   // add ngh to candidates without adding any repeats
   template<typename rangeType1, typename rangeType2>
-  void add_neighbors_without_repeats(const rangeType1 &ngh, rangeType2& candidates) {
+  void add_neighbors_without_repeats(const rangeType1 &ngh, rangeType2& candidates, int offset = 0) {
     std::unordered_set<indexType> a;
     // for (auto c : candidates) a.insert(c);
     for (const auto& [neighbor, distance] : candidates) a.insert(neighbor);
     for (int i=0; i < ngh.size(); i++)
-      if (a.count(ngh[i].first) == 0) candidates.push_back(ngh[i]);
+      if (a.count(ngh[i].first - offset) == 0) candidates.push_back(std::make_pair(ngh[i].first - offset, ngh[i].second));
   }
 
   void set_start(){start_point = 0;}
@@ -262,7 +262,7 @@ struct knn_index {
       parlay::sequence<parlay::sequence<std::pair<indexType, distanceType>>> new_out_(ceiling-floor);
 
       // search for each node starting from the start_point, then call
-      // robustPrune with the visited list as its candidate set
+      // robustPrune with the visited list as its candidㅋate set
       t_beam.start();
 
       parlay::parallel_for(floor, ceiling, [&](size_t i) {
@@ -270,13 +270,13 @@ struct knn_index {
         int sp = BP.single_batch ? i : start_point;
         QueryParams QP((long) 0, BP.L, (double) 0.0, (long) Points.size(), (long) G.max_degree());
         auto [beam_visited, bs_distance_comps] =
-          beam_search<Point, PointRange, indexType>(Points[index], G, Points, sp, QP);
+          beam_search<Point, PointRange, indexType>(Points[index], G, Points, sp, QP, 0);
         auto [beam, visited] = beam_visited;
         BuildStats.increment_dist(index, bs_distance_comps);
         BuildStats.increment_visited(index, visited.size());
 
         long rp_distance_comps;
-        std::tie(new_out_[i-floor], rp_distance_comps) = robustPrune(index, visited, G, Points, alpha);
+        std::tie(new_out_[i-floor], rp_distance_comps) = robustPrune(index, visited, G, Points, alpha, 0);
         BuildStats.increment_dist(index, rp_distance_comps);
       });
       t_beam.stop();
@@ -298,7 +298,7 @@ struct knn_index {
       // for (size_t i = 0; i < new_out_.size(); i++) {
       //   std::cout << shuffled_inserts[floor + i] << ") ";
       //   for (size_t j = 0; j < new_out_[i].size(); j++) {
-      //     std::cout << new_out_[i][j] << " ";
+      //     std::cout << new_out_[i][j].first << " ";
       //   }
       //   std::cout << std::endl;
       // }
@@ -307,7 +307,7 @@ struct knn_index {
       // for (size_t i = 0; i < grouped_by.size(); i++) {
       //   std::cout << grouped_by[i].first << ") ";
       //   for (size_t j = 0; j < grouped_by[i].second.size(); j++) {
-      //     std::cout << grouped_by[i].second[j] << " ";
+      //     std::cout << grouped_by[i].second[j].first << " ";
       //   }
       //   std::cout << std::endl;
       // }
@@ -330,7 +330,7 @@ struct knn_index {
           G[index].update_neighbors(candidates);
         } else {
           // auto [new_out_2_, distance_comps] = robustPrune(index, std::move(candidates), G, Points, alpha);
-          auto [new_out_2_, distance_comps] = robustPrune(index, candidates, G, Points, alpha);
+          auto [new_out_2_, distance_comps] = robustPrune(index, candidates, G, Points, alpha, 0);
           G[index].update_neighbors(new_out_2_);
           BuildStats.increment_dist(index, distance_comps);
         }
@@ -362,10 +362,211 @@ struct knn_index {
   }
 
 
-  void build_index_disk(GraphI &G, PR &Points, stats<indexType> &BuildStats, int start, 
-                        bool sort_neighbors = true, bool random_order = false){
+  void build_index_disk(GraphI &G, PR &Points, stats<indexType> &BuildStats, double alpha, int start,
+                        bool random_order = false, double base = 2, double max_fraction = .02, 
+                        bool sort_neighbors = true, bool print=true){
     std::cout << "Building graph from " << start << std::endl;
+    set_start();
+    parlay::sequence<indexType> inserts = parlay::tabulate(Points.size(), [&] (size_t i){
+					    return static_cast<indexType>(i);});
+    std::cout << "number of points = " << Points.size() << std::endl;
 
+    // // last pass uses alpha
+    // std::cout << "number of passes = " << BP.num_passes << std::endl;
+    // for (int i=0; i < BP.num_passes; i++) {
+    //   if (i == BP.num_passes - 1)
+    //     batch_insert(inserts, G, Points, BuildStats, BP.alpha, true, 2, .02);
+    //   else
+    //     batch_insert(inserts, G, Points, BuildStats, 1.0, true, 2, .02);
+    // }
+
+    // ========================== batch insert
+    // initial memory usage
+    // long max_memory_usage = get_memory_usage();
+
+    for(int p : inserts){
+      if(p < 0 || p > (int) G.size()){
+        std::cout << "ERROR: invalid point "
+                  << p << " given to batch_insert" << std::endl;
+        abort();
+      }
+    }
+
+    size_t n = G.size();
+    size_t m = inserts.size();
+    size_t inc = 0;
+    size_t count = 0;
+    float frac = 0.0;
+    float progress_inc = .1;
+    size_t max_batch_size = std::min(
+        static_cast<size_t>(max_fraction * static_cast<float>(n)), 1000000ul);
+    //fix bug where max batch size could be set to zero
+    if(max_batch_size == 0) max_batch_size = n;
+    parlay::sequence<int> rperm;
+    if (random_order)
+      rperm = parlay::random_permutation<int>(static_cast<int>(m));
+    else
+      rperm = parlay::tabulate(m, [&](int i) { return i; });
+    auto shuffled_inserts =
+        parlay::tabulate(m, [&](size_t i) { return inserts[rperm[i]]; });
+    parlay::internal::timer t_beam("beam search time");
+    parlay::internal::timer t_bidirect("bidirect time");
+    parlay::internal::timer t_prune("prune time");
+    t_beam.stop();
+    t_bidirect.stop();
+    t_prune.stop();
+    while (count < m) {
+      size_t floor;
+      size_t ceiling;
+      if (pow(base, inc) <= max_batch_size) {
+        floor = static_cast<size_t>(pow(base, inc)) - 1;
+        ceiling = std::min(static_cast<size_t>(pow(base, inc + 1)) - 1, m);
+        count = std::min(static_cast<size_t>(pow(base, inc + 1)) - 1, m);
+      } else {
+        floor = count;
+        ceiling = std::min(count + static_cast<size_t>(max_batch_size), m);
+        count += static_cast<size_t>(max_batch_size);
+      }
+
+      if (BP.single_batch != 0) {
+        floor = 0;
+        ceiling = m;
+        count = m;
+      }
+      
+      std::cout << "Batch insert: " << floor << " to " << ceiling << "(" << ceiling-floor << ")" << std::endl;
+
+      // parlay::sequence<parlay::sequence<indexType>> new_out_(ceiling-floor);
+      parlay::sequence<parlay::sequence<std::pair<indexType, distanceType>>> new_out_(ceiling-floor);
+
+      // search for each node starting from the start_point, then call
+      // robustPrune with the visited list as its candidate set
+      t_beam.start();
+
+      parlay::parallel_for(floor, ceiling, [&](size_t i) {
+        size_t index = shuffled_inserts[i];
+        int sp = BP.single_batch ? i : start_point;
+        // int sp = BP.single_batch ? i : start;
+        QueryParams QP((long) 0, BP.L, (double) 0.0, (long) Points.size(), (long) G.max_degree());
+        auto [beam_visited, bs_distance_comps] =
+          beam_search<Point, PointRange, indexType>(Points[index], G, Points, sp, QP, start);
+        auto [beam, visited] = beam_visited;
+        BuildStats.increment_dist(index, bs_distance_comps);
+        BuildStats.increment_visited(index, visited.size());
+
+        long rp_distance_comps;
+        std::tie(new_out_[i-floor], rp_distance_comps) = robustPrune(index, visited, G, Points, alpha, start);
+        BuildStats.increment_dist(index, rp_distance_comps);
+      });
+      t_beam.stop();
+
+      // make each edge bidirectional by first adding each new edge
+      //(i,j) to a sequence, then semisorting the sequence by key values
+      t_bidirect.start();
+
+      auto flattened = parlay::delayed::flatten(parlay::tabulate(ceiling - floor, [&](size_t i) {
+        indexType index = shuffled_inserts[i + floor];
+        // return parlay::delayed::map(new_out_[i], [=] (indexType ngh) {
+        //                               return std::pair(ngh, index);});}));
+        return parlay::delayed::map(new_out_[i], [=] (std::pair<indexType, distanceType> ngh_dst) {
+                                      return std::make_pair(ngh_dst.first, std::make_pair(index, ngh_dst.second));
+                                      });}));
+      auto grouped_by = parlay::group_by_key(parlay::delayed::to_sequence(flattened));
+
+      // std::cout << "new_out_" << std::endl;
+      // for (size_t i = 0; i < new_out_.size(); i++) {
+      //   std::cout << shuffled_inserts[floor + i] << ") ";
+      //   for (size_t j = 0; j < new_out_[i].size(); j++) {
+      //     std::cout << new_out_[i][j].first << " ";
+      //   }
+      //   std::cout << std::endl;
+      // }
+
+      // std::cout << "grouped_by" << std::endl;
+      // for (size_t i = 0; i < grouped_by.size(); i++) {
+      //   std::cout << grouped_by[i].first << ") ";
+      //   for (size_t j = 0; j < grouped_by[i].second.size(); j++) {
+      //     std::cout << grouped_by[i].second[j].first << " ";
+      //   }
+      //   std::cout << std::endl;
+      // }
+
+      parlay::parallel_for(floor, ceiling, [&](size_t i) {
+        // G[shuffled_inserts[i]].update_neighbors(new_out_[i-floor]);
+        G[shuffled_inserts[i]].update_neighbors_global(new_out_[i-floor], start);
+        // if (start > 0) {
+        //   std::cout << "index " << shuffled_inserts[i] << " neighbors:";
+        //   for (int j=0; j<G[shuffled_inserts[i]].size(); i++) {
+        //     std::cout << " " << G[shuffled_inserts[i]][j].first;
+        //   }
+        //   std::cout << std::endl;
+        // }
+        
+      });
+
+      t_bidirect.stop();
+      
+      t_prune.start();
+      // finally, add the bidirectional edges; if they do not make
+      // the vertex exceed the degree bound, just add them to out_nbhs;
+      // otherwise, use robustPrune on the vertex with user-specified alpha
+      parlay::parallel_for(0, grouped_by.size(), [&](size_t j) {
+        auto &[index, candidates] = grouped_by[j];
+        size_t newsize = candidates.size() + G[index].size();
+        if (newsize <= BP.R) {
+          add_neighbors_without_repeats(G[index], candidates, start);
+          G[index].update_neighbors_global(candidates, start);
+          // if (start > 0){
+          //   std::cout << "index " << index << " neighbors:";
+          //   for (int i=0; i<G[index].size(); i++) {
+          //     std::cout << " " << G[index][i].first;
+          //   }
+          //   std::cout << std::endl;
+          // }
+        } else {
+          // auto [new_out_2_, distance_comps] = robustPrune(index, std::move(candidates), G, Points, alpha);
+          auto [new_out_2_, distance_comps] = robustPrune(index, candidates, G, Points, alpha, start);
+          G[index].update_neighbors_global(new_out_2_, start);
+          BuildStats.increment_dist(index, distance_comps);
+        }
+      });
+      t_prune.stop();
+      if (print && BP.single_batch == 0) {
+        auto ind = frac * n;
+        if (floor <= ind && ceiling > ind) {
+          frac += progress_inc;
+          std::cout << "Pass " << 100 * frac << "% complete"
+                    << std::endl;
+        }
+      }
+      inc += 1;
+
+      // // current memory usage
+      // long current_memory_usage = get_memory_usage();
+      // if (current_memory_usage > max_memory_usage) {
+      //     max_memory_usage = current_memory_usage;
+      // }
+    }
+
+    // // 최종적으로 기록된 최대 메모리 사용량 출력
+    // std::cout << "Max memory usage during batch insert: " << max_memory_usage << " KB" << std::endl;
+    
+    t_beam.total();
+    t_bidirect.total();
+    t_prune.total();
+    
+
+    if (sort_neighbors) {
+      std::cout << "Sorting neighbors..." << std::endl;
+      parlay::parallel_for (0, G.size(), [&] (long i) {
+        // auto less = [&] (indexType j, indexType k) {
+        //               return Points[i].distance(Points[j]) < Points[i].distance(Points[k]);};
+        auto less = [&] (const std::pair<indexType, distanceType>& j, 
+                        const std::pair<indexType, distanceType>& k) {
+          return j.second < k.second;
+        };
+        G[i].sort(less);});
+    }
   }
 
 };

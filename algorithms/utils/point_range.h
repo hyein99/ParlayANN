@@ -119,6 +119,63 @@ struct PointRange{
       }
   }
 
+  PointRange(char* filename, int start, int end) : values(std::shared_ptr<T[]>(nullptr, std::free)) {
+    if (filename == NULL || start >= end) {
+        n = 0;
+        dims = 0;
+        return;
+    }
+
+    std::ifstream reader(filename, std::ios::binary);
+    assert(reader.is_open());
+
+    // read number of points and dimension
+    unsigned int num_points;
+    unsigned int d;
+    reader.read((char*)(&num_points), sizeof(unsigned int));
+    reader.read((char*)(&d), sizeof(unsigned int));
+    n = end - start;
+    dims = d;
+    params = parameters(d);
+    std::cout << "Detected " << num_points << " points with dimension " << d << std::endl;
+    aligned_dims = dim_round_up(dims, sizeof(T));
+    if (aligned_dims != dims) std::cout << "Aligning dimension to " << aligned_dims << std::endl;
+
+    if (end > num_points) {
+        end = num_points;  // Ensure the end does not exceed the number of points in the file
+    }
+    size_t num_selected_points = end - start;
+    long num_bytes = num_selected_points * aligned_dims * sizeof(T);
+    T* ptr = (T*)aligned_alloc(1l << 21, num_bytes);
+    madvise(ptr, num_bytes, MADV_HUGEPAGE);
+    values = std::shared_ptr<T[]>(ptr, std::free);
+    size_t BLOCK_SIZE = 1000000;
+    size_t index = start;
+
+    // Move file cursor to the starting point
+    reader.seekg(sizeof(unsigned int) * 2 + start * dims * sizeof(T));
+    while (index < end) {
+        size_t floor = index;
+        size_t ceiling = index + BLOCK_SIZE <= end ? index + BLOCK_SIZE : end;
+        size_t block_size = ceiling - floor;
+
+        T* data_start = new T[block_size * dims];
+        reader.read((char*)(data_start), sizeof(T) * block_size * dims);
+        T* data_end = data_start + block_size * dims;
+        parlay::slice<T*, T*> data = parlay::make_slice(data_start, data_end);
+
+        int data_bytes = dims * sizeof(T);
+        parlay::parallel_for(floor, ceiling, [&](size_t i) {
+            for (int j = 0; j < dims; j++) {
+                values.get()[(i - start) * aligned_dims + j] = data[(i - floor) * dims + j];
+            }
+        });
+
+        delete[] data_start;
+        index = ceiling;
+    }
+}
+
   size_t size() const { return n; }
 
   unsigned int get_dims() const { return dims; }

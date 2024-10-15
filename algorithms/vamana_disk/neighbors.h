@@ -42,66 +42,6 @@ void ANN_(Graph<indexType> &G, long k, BuildParams &BP,
           PointRange &Query_Points, QPointRange &Q_Query_Points,
           groundTruth<indexType> GT, char *res_file,
           bool graph_built, PointRange &Points, QPointRange &Q_Points) {
-  // parlay::internal::timer t("ANN");
-
-  // bool verbose = BP.verbose;
-  // using findex = knn_index<QPointRange, indexType>;
-  // findex I(BP);
-  // indexType start_point;
-  // double idx_time;
-  // stats<unsigned int> BuildStats(G.size());
-  // if(graph_built){
-  //   idx_time = 0;
-  //   start_point = 0;
-  // } else{
-  //   I.build_index(G, Q_Points, BuildStats);
-  //   start_point = I.get_start();
-  //   idx_time = t.next_time();
-  // }
-  // std::cout << "start index = " << start_point << std::endl;
-
-  // std::string name = "Vamana";
-  // std::string params =
-  //   "R = " + std::to_string(BP.R) + ", L = " + std::to_string(BP.L);
-  // auto [avg_deg, max_deg] = graph_stats_(G);
-  // auto vv = BuildStats.visited_stats();
-  // std::cout << "Average visited: " << vv[0] << ", Tail visited: " << vv[1]
-  //           << std::endl;
-  // Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
-  // G_.print();
-
-  // long build_num_distances = parlay::reduce(parlay::map(BuildStats.distances,
-  //                                                       [] (auto x) {return (long) x;}));
-
-  // if(Query_Points.size() != 0) {
-  //   search_and_parse<Point, PointRange, QPointRange, indexType>(G_, G, Points, Query_Points,
-  //                                                               Q_Points, Q_Query_Points, GT,
-  //                                                               res_file, k, false, start_point,
-  //                                                               verbose);
-  // } else if (BP.self) {
-  //   if (BP.range) {
-  //     parlay::internal::timer t_range("range search time");
-  //     double radius = BP.radius;
-  //     double radius_2 = BP.radius_2;
-  //     std::cout << "radius = " << radius << " radius_2 = " << radius_2 << std::endl;
-  //     QueryParams QP;
-  //     long n = Points.size();
-  //     parlay::sequence<long> counts(n);
-  //     parlay::sequence<long> distance_comps(n);
-  //     parlay::parallel_for(0, G.size(), [&] (long i) {
-  //       parlay::sequence<indexType> pts;
-  //       pts.push_back(Points[i].id());
-  //       auto [r, dc] = range_search(Points[i], G, Points, pts, radius, radius_2, QP, true);
-  //       counts[i] = r.size();
-  //       distance_comps[i] = dc;});
-  //     t_range.total();
-  //     long range_num_distances = parlay::reduce(distance_comps);
-
-  //     std::cout << "edges within range: " << parlay::reduce(counts) << std::endl;
-  //     std::cout << "distance comparisons during build = " << build_num_distances << std::endl;
-  //     std::cout << "distance comparisons during range = " << range_num_distances << std::endl;
-  //   }
-  // }
 }
 
 template<typename Point, typename PointRange_, typename indexType>
@@ -109,32 +49,11 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
          PointRange_ &Query_Points,
          groundTruth<indexType> GT, char *res_file,
          bool graph_built, PointRange_ &Points) {
-  // if (BP.quantize && sizeof(typename PointRange_::T) >= 2) {
-  //   std::cout << "quantizing build and first pass of search to 1 byte" << std::endl;
-  //   if (Point::is_metric()) {
-  //     using QT = uint8_t;
-  //     using QPoint = Euclidian_Point<QT>;
-  //     using QPR = PointRange<QT, QPoint>;
-  //     QPR Q_Points(Points);  // quantized to one byte
-  //     QPR Q_Query_Points(Query_Points, Q_Points.params);
-  //     ANN_<Point, PointRange_, QPR, indexType>(G, k, BP, Query_Points, Q_Query_Points, GT, res_file, graph_built, Points, Q_Points);
-  //   } else {
-  //     using QT = int8_t;
-  //     using QPoint = Quantized_Mips_Point<QT>;
-  //     using QPR = PointRange<QT, QPoint>;
-  //     QPR Q_Points(Points);
-  //     QPR Q_Query_Points(Query_Points, Q_Points.params);
-  //     ANN_<Point, PointRange_, QPR, indexType>(G, k, BP, Query_Points, Q_Query_Points, GT, res_file, graph_built, Points, Q_Points);
-  //   }
-  // } else {
-  //   ANN_<Point, PointRange_, PointRange_, indexType>(G, k, BP, Query_Points, Query_Points, GT, res_file, graph_built, Points, Points);
-  // }
-  // ANN_<Point, PointRange_, PointRange_, indexType>(G, k, BP, Query_Points, Query_Points, GT, res_file, graph_built, Points, Points);
 }
 
 
 template<typename Point, typename PointRange_, typename indexType>
-void ANN_disk(char *input_file, char *query_file, char *graph_file, char *out_file, bool graph_built,
+void ANN_disk(char *input_file, char *graph_file, char *out_file, char *res_file, bool graph_built,
               long k, BuildParams &BP, groundTruth<indexType> GT, int partition_size) {
   std::ifstream reader(input_file);
   //read num points and max degree
@@ -144,11 +63,9 @@ void ANN_disk(char *input_file, char *query_file, char *graph_file, char *out_fi
   reader.read((char*)(&d), sizeof(unsigned int));
   int start;
   int end;
-  PointRange<float, Euclidian_Point<float>> Query_Points = PointRange<float, Euclidian_Point<float>>(query_file);
 
   for (int i = 0; i < partition_size; i++) {
     parlay::internal::timer t("ANN");
-
 
     start = i * num_points / partition_size;
     end = (i + 1) * num_points / partition_size;
@@ -156,17 +73,9 @@ void ANN_disk(char *input_file, char *query_file, char *graph_file, char *out_fi
     PointRange<float, Euclidian_Point<float>> Points = PointRange<float, Euclidian_Point<float>>(input_file, start, end);
     std::cout << "Read " << Points.size() << " points" << std::endl;
 
-    Graph<unsigned int> G;
-    if(graph_file == NULL) G = Graph<unsigned int>(BP.max_degree(), Points.size());
-    else G = Graph<unsigned int>(graph_file);
-
-    // timeNeighbors<Point, PR, uint>(G, Query_Points, k, BP, oFile, GT, rFile, graph_built, Points);
-    // time_loop(1, 0,
-    //   [&] () {},
-    //   [&] () {
-    //     ANN<Point, PointRange_, indexType>(G, k, BP, Query_Points, GT, res_file, graph_built, Points);
-    //   },
-    //   [&] () {});
+    Graph_disk<unsigned int> G;
+    if(graph_file == NULL) G = Graph_disk<unsigned int>(BP.max_degree(), Points.size());
+    else G = Graph_disk<unsigned int>(graph_file);
 
     bool verbose = BP.verbose;
     using findex = knn_index<PointRange_, indexType>;
@@ -178,31 +87,49 @@ void ANN_disk(char *input_file, char *query_file, char *graph_file, char *out_fi
       idx_time = 0;
       start_point = 0;
     } else{
-      I.build_index_disk(G, Points, BuildStats, start);
-      // start_point = I.get_start();
-      start_point = start;
+      I.build_index_disk(G, Points, BuildStats, BP.alpha, start, true, 2, .02, true, true);
+      // I.build_index(G, Points, BuildStats);
+      start_point = I.get_start();
+      // start_point = start;
       // idx_time = t.next_time();
     }
     std::cout << "start index = " << start_point << std::endl;
 
+    // print graph examples
+    for (int i = 0; i < 10; i++) {
+      std::cout << "Example of vertex " << i << "(total " << G[i].size() << ")" << std::endl;
+      for (int j = 0; j < G[i].size(); j++) {
+        std::cout << "(" << G[i][j].first << " " << G[i][j].second << ") ";
+      }
+      std::cout << std::endl;
+    }
+
     std::string name = "Vamana";
     std::string params =
       "R = " + std::to_string(BP.R) + ", L = " + std::to_string(BP.L);
-    auto [avg_deg, max_deg] = graph_stats_(G);
+    // auto [avg_deg, max_deg] = graph_stats_(G);
+    auto od = parlay::delayed_seq<size_t>(
+        G.size(), [&](size_t i) { return G[i].size(); });
+    size_t j = parlay::max_element(od) - od.begin();
+    int max_deg = od[j];
+    size_t sum1 = parlay::reduce(od);
+    double avg_deg = sum1 / ((double)G.size());
     auto vv = BuildStats.visited_stats();
     std::cout << "Average visited: " << vv[0] << ", Tail visited: " << vv[1]
               << std::endl;
+
     Graph_ G_(name, params, G.size(), avg_deg, max_deg, idx_time);
     G_.print();
 
     
     if(out_file != NULL) {
       std::string outfile(out_file);
-      outfile += "_" + std::to_string(i);
+      outfile += "_sub_" + std::to_string(i);
       std::cout << "Saving graph to " << outfile << std::endl;
       // G.save(outfile.c_str());
-      G.save(const_cast<char*>(outfile.c_str()));
+      G.save_subgraph(const_cast<char*>(outfile.c_str()));
     }
+
   }
 
 }

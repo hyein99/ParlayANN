@@ -43,29 +43,29 @@
 template<typename indexType, typename Point, typename PointRange, class GT>
 std::pair<std::pair<parlay::sequence<std::pair<indexType, typename Point::distanceType>>, parlay::sequence<std::pair<indexType, typename Point::distanceType>>>, size_t>
 beam_search_impl_disk(Point p, GT &G, PointRange &Points,
-        parlay::sequence<indexType> starting_points, QueryParams &QP);
+        parlay::sequence<indexType> starting_points, QueryParams &QP, int offset);
 
 template<typename Point, typename PointRange, typename indexType>
 std::pair<std::pair<parlay::sequence<std::pair<indexType, typename Point::distanceType>>, parlay::sequence<std::pair<indexType, typename Point::distanceType>>>, indexType>
 beam_search(Point p, Graph_disk<indexType> &G, PointRange &Points,
-	    indexType starting_point, QueryParams &QP) {
+	    indexType starting_point, QueryParams &QP, int offset) {
 
   parlay::sequence<indexType> start_points = {starting_point};
-  return beam_search_impl_disk<indexType>(p, G, Points, start_points, QP);
+  return beam_search_impl_disk<indexType>(p, G, Points, start_points, QP, offset);
 }
 
-template<typename Point, typename PointRange, typename indexType>
-std::pair<std::pair<parlay::sequence<std::pair<indexType, typename Point::distanceType>>, parlay::sequence<std::pair<indexType, typename Point::distanceType>>>, size_t>
-beam_search(Point p, Graph_disk<indexType> &G, PointRange &Points,
-        parlay::sequence<indexType> starting_points, QueryParams &QP) {
-  return beam_search_impl_disk<indexType>(p, G, Points, starting_points, QP);
-}
+// template<typename Point, typename PointRange, typename indexType>
+// std::pair<std::pair<parlay::sequence<std::pair<indexType, typename Point::distanceType>>, parlay::sequence<std::pair<indexType, typename Point::distanceType>>>, size_t>
+// beam_search(Point p, Graph_disk<indexType> &G, PointRange &Points,
+//         parlay::sequence<indexType> starting_points, QueryParams &QP) {
+//   return beam_search_impl_disk<indexType>(p, G, Points, starting_points, QP);
+// }
 
 // main beam search
 template<typename indexType, typename Point, typename PointRange, class GT>
 std::pair<std::pair<parlay::sequence<std::pair<indexType, typename Point::distanceType>>, parlay::sequence<std::pair<indexType, typename Point::distanceType>>>, size_t>
 beam_search_impl_disk(Point p, GT &G, PointRange &Points,
-                 parlay::sequence<indexType> starting_points, QueryParams &QP) {
+                 parlay::sequence<indexType> starting_points, QueryParams &QP, int offset) {
   if (starting_points.size() == 0) {
     std::cout << "beam search expects at least one start point" << std::endl;
     abort();
@@ -142,11 +142,19 @@ beam_search_impl_disk(Point p, GT &G, PointRange &Points,
     keep.clear();
     long num_elts = std::min<long>(G[current.first].size(), QP.degree_limit);
     for (indexType i=0; i<num_elts; i++) {
-      auto a = G[current.first][i].first;
+      auto a = G[current.first][i].first - offset;
       if (has_been_seen(a) || Points[a].same_as(p)) continue;  // skip if already seen
       keep.push_back(a);
       Points[a].prefetch();
     }
+
+    // if (offset > 0) {
+    //   std::cout << "keep ";
+    //   for (auto a : keep) {
+    //     std::cout << a << " ";
+    //   }
+    //   std::cout << std::endl;
+    // }
 
     // Further filter on whether distance is greater than current
     // furthest distance in current frontier (if full).
