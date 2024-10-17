@@ -51,24 +51,17 @@ void ANN(Graph<indexType> &G, long k, BuildParams &BP,
          bool graph_built, PointRange_ &Points) {
 }
 
-
 template<typename Point, typename PointRange_, typename indexType>
-void ANN_disk(char *input_file, char *graph_file, char *out_file, char *res_file, bool graph_built,
-              long k, BuildParams &BP, groundTruth<indexType> GT, int partition_size) {
-  std::ifstream reader(input_file);
-  //read num points and max degree
-  unsigned int num_points;
-  unsigned int d;
-  reader.read((char*)(&num_points), sizeof(unsigned int));
-  reader.read((char*)(&d), sizeof(unsigned int));
+void ANN_disk_partition(char *input_file, char *graph_file, char *out_file, bool graph_built,
+                        BuildParams &BP, stats<indexType> &BuildStats, int num_points, int d, int partition) {
   int start;
   int end;
 
-  for (int i = 0; i < partition_size; i++) {
+  for (int i = 0; i < partition; i++) {
     parlay::internal::timer t("ANN");
 
-    start = i * num_points / partition_size;
-    end = (i + 1) * num_points / partition_size;
+    start = i * num_points / partition;
+    end = (i + 1) * num_points / partition;
     std::cout << "Reading partition " << i << " from " << start << " to " << end << std::endl;
     PointRange<float, Euclidian_Point<float>> Points = PointRange<float, Euclidian_Point<float>>(input_file, start, end);
     std::cout << "Read " << Points.size() << " points" << std::endl;
@@ -82,7 +75,6 @@ void ANN_disk(char *input_file, char *graph_file, char *out_file, char *res_file
     findex I(BP);
     indexType start_point;
     double idx_time;
-    stats<unsigned int> BuildStats(G.size());
     if(graph_built){
       idx_time = 0;
       start_point = 0;
@@ -131,6 +123,112 @@ void ANN_disk(char *input_file, char *graph_file, char *out_file, char *res_file
     }
 
   }
+}
+
+
+template<typename Point, typename PointRange_, typename indexType>
+void ANN_disk_merge(char *input_file, char *graph_file, bool graph_built, BuildParams &BP, stats<indexType> &BuildStats, 
+                    int num_points, int d, int partition) {
+  int partition_size = num_points / partition;
+  int p1 = 0;
+  int p2 = 1;
+  PointRange<float, Euclidian_Point<float>> Points1;
+  PointRange<float, Euclidian_Point<float>> Points2;
+  Graph_disk<unsigned int> G1;
+  Graph_disk<unsigned int> G2;
+
+  // Read First Partition and Graph
+  std::string graphfile(graph_file);
+  std::cout << "(Partition 1) Reading partition " << p1 
+            << " from " << p1 * partition_size << " to " << (p1 + 1) * partition_size << std::endl;
+  Points1 = PointRange<float, Euclidian_Point<float>>(input_file, p1 * partition_size, (p1 + 1) * partition_size);
+  G1 = Graph_disk<unsigned int>(const_cast<char*>((graphfile + "_sub_" + std::to_string(p1)).c_str()));
+
+  while (true) {
+    // Read Second Partition and Graph
+    std::cout << "(Partition 2) Reading partition " << p2 
+              << " from " << p2 * partition_size << " to " << (p2 + 1) * partition_size << std::endl;
+    Points2 = PointRange<float, Euclidian_Point<float>>(input_file, p2 * partition_size, (p2 + 1) * partition_size);
+    G2 = Graph_disk<unsigned int>(const_cast<char*>((graphfile + "_sub_" + std::to_string(p2)).c_str()));
+
+    bool verbose = BP.verbose;
+    using findex = knn_index<PointRange_, indexType>;
+    findex I(BP);
+    indexType start_point;
+    double idx_time;
+    if(graph_built){
+      idx_time = 0;
+      start_point = 0;
+    } else{
+      I.merge_index_disk(G1, G2, Points1, Points2, p1, p2, partition_size,
+                        BuildStats, BP.alpha, true, true, true);
+      // std::cout << "Merged " << " from " << p1 << " to " << p2 << std::endl;
+      start_point = I.get_start();
+      // idx_time = t.next_time();
+    }
+    break;
+    // std::cout << "start index = " << start_point << std::endl;
+
+    // // print graph examples
+    // for (int i = 0; i < 10; i++) {
+    //   std::cout << "Example of vertex " << i << "(total " << G[i].size() << ")" << std::endl;
+    //   for (int j = 0; j < G[i].size(); j++) {
+    //     std::cout << "(" << G[i][j].first << " " << G[i][j].second << ") ";
+    //   }
+    //   std::cout << std::endl;
+    // }
+
+    // std::string name = "Vamana";
+    // std::string params =
+    //   "R = " + std::to_string(BP.R) + ", L = " + std::to_string(BP.L);
+    // // auto [avg_deg, max_deg] = graph_stats_(G);
+    // auto od = parlay::delayed_seq<size_t>(
+    //     G1.size(), [&](size_t i) { return G[i].size(); });
+    // size_t j = parlay::max_element(od) - od.begin();
+    // int max_deg = od[j];
+    // size_t sum1 = parlay::reduce(od);
+    // double avg_deg = sum1 / ((double)G1.size());
+    // auto vv = BuildStats.visited_stats();
+    // std::cout << "Average visited: " << vv[0] << ", Tail visited: " << vv[1]
+    //           << std::endl;
+
+    // Graph_ G_(name, params, G1.size(), avg_deg, max_deg, idx_time);
+    // G_.print();
+
+    // Write graph 1
+    Graph_disk<unsigned int>();
+    std::cout << "Saving graph to " << graphfile + "_sub_" + std::to_string(p1) << std::endl;
+    G1.save_subgraph(const_cast<char*>((graphfile + "_sub_" + std::to_string(p1)).c_str()));
+
+    p1 = (p1 + 1) % partition;
+    p2 = (p2 + 1) % partition;
+    if (p1 == 0) {
+      break;
+    }
+    std::swap(Points1, Points2);
+    std::swap(G1, G2);
+  }
+
+}
+
+
+template<typename Point, typename PointRange_, typename indexType>
+void ANN_disk(char *input_file, char *graph_file, char *out_file, char *res_file, bool graph_built,
+              long k, BuildParams &BP, groundTruth<indexType> GT, int partition) {
+  std::ifstream reader(input_file);
+  //read num points and max degree
+  unsigned int num_points;
+  unsigned int d;
+  reader.read((char*)(&num_points), sizeof(unsigned int));
+  reader.read((char*)(&d), sizeof(unsigned int));
+
+  stats<unsigned int> BuildStats(num_points);
+
+  // build graph partition
+  // ANN_disk_partition<Point, PointRange_, indexType>(input_file, graph_file, out_file, graph_built, BP, BuildStats, num_points, d, partition);
+
+  // merge graph partition
+  ANN_disk_merge<Point, PointRange_, indexType>(input_file, out_file, graph_built, BP, BuildStats, num_points, d, partition);
 
 }
 
